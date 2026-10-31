@@ -1,0 +1,47 @@
+devices:
+  samplerate: 48000
+  chunksize: 512
+  queuelimit: 4
+  enable_rate_adjust: true
+  adjust_period: 3
+  target_level: 1024
+
+  capture:
+    type: Alsa
+    channels: 4
+    device: "hw:PiMixRP18ch,0"
+    format: S32LE
+
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Device,0"
+    format: S16LE
+
+mixers:
+  pimix_4to2:
+    description: "Mix PiMix USB 1 (Ch 0-1) and PiMix USB 2 (Ch 2-3) to Stereo Output"
+    channels:
+      in: 4
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0.0
+            inverted: false
+          - channel: 2
+            gain: 0.0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0.0
+            inverted: false
+          - channel: 3
+            gain: 0.0
+            inverted: false
+
+pipeline:
+  - type: Mixer
+    name: pimix_4to2

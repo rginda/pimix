@@ -55,3 +55,8 @@ A chronological engineering log tracking the architecture, firmware, hardware br
     - **Pin 20 (`GP15`):** `LRCLK` input (from Pi 5 `GPIO 19`, Pin 35)
 - Updated the firmware pin definitions to `GP13` / `GP14` / `GP15` and ran [`scripts/verify-loopback.py`](../scripts/verify-loopback.py):
   - **Result:** Simultaneous 24-bit / 48 kHz stereo USB playback (`aplay` on `hw:P1` with 375 Hz L / 750 Hz R and `hw:P2` with 600 Hz L / 1200 Hz R at `-6.0 dBFS`) captured via `arecord` on `hw:PiMixRP18ch` measured `-6.0 dBFS` peak, `-9.0 dBFS` RMS, and exact frequencies (`375.0 Hz`, `750.0 Hz`, `600.0 Hz`, `1200.0 Hz`) on all 4 channels with zero bit-slip (`0x00` in the bottom 8 padding bits of every 32-bit word).
+
+### 7. Live CamillaDSP Mixing & Speaker Output Verification
+- Connected a USB Audio DAC/Speaker interface (`hw:Device,0`, `1b3f:2008` Generalplus USB Audio Device, 48 kHz `S16_LE` stereo playback) to `rpi5-dev`.
+- Created [`pi5/camilladsp/pimix-4ch-usb-out.yml`](../pi5/camilladsp/pimix-4ch-usb-out.yml) to capture all 4 I2S channels (`hw:PiMixRP18ch,0`, `S32_LE` @ 48 kHz), sum `PiMix USB 1` (Ch 0–1) and `PiMix USB 2` (Ch 2–3) into a stereo output bus with asynchronous rate adaptation (`enable_rate_adjust: true`), and play out to `hw:Device,0`.
+- Created [`scripts/play-speaker-test.py`](../scripts/play-speaker-test.py) to launch CamillaDSP (`-p 1234` WebSocket control port enabled) and play a 14-second stereo musical test sequence across both Picos (`PiMix USB 1` solo arpeggio panning Left → Right, `PiMix USB 2` solo counter-melody panning Right → Left, and both Picos playing chords + melody simultaneously). Verified clean, glitch-free stereo audio from the speakers.
