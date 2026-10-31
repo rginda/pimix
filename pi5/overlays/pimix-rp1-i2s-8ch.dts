@@ -1,0 +1,61 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2712";
+
+    fragment@0 {
+        target = <&rp1_gpio>;
+        __overlay__ {
+            rp1_i2s0_4lane_in: rp1_i2s0_4lane_in {
+                function = "i2s0";
+                pins = "gpio18", "gpio19", "gpio20", "gpio22", "gpio24", "gpio26";
+                bias-disable;
+            };
+        };
+    };
+
+    fragment@1 {
+        target = <&rp1_i2s0>;
+        __overlay__ {
+            pinctrl-names = "default";
+            pinctrl-0 = <&rp1_i2s0_4lane_in>;
+            #sound-dai-cells = <0>;
+            status = "okay";
+        };
+    };
+
+    fragment@2 {
+        target-path = "/";
+        __overlay__ {
+            pimix_dmic_codec: pimix-dmic-codec {
+                compatible = "dmic-codec";
+                #sound-dai-cells = <0>;
+                num-channels = <8>;
+                status = "okay";
+            };
+        };
+    };
+
+    fragment@3 {
+        target = <&sound>;
+        __overlay__ {
+            compatible = "simple-audio-card";
+            i2s-controller = <&rp1_i2s0>;
+            status = "okay";
+
+            simple-audio-card,name = "PiMix-RP1-8ch";
+            simple-audio-card,format = "i2s";
+            simple-audio-card,bitclock-master = <&cpu_dai>;
+            simple-audio-card,frame-master = <&cpu_dai>;
+
+            cpu_dai: simple-audio-card,cpu {
+                sound-dai = <&rp1_i2s0>;
+            };
+
+            simple-audio-card,codec {
+                sound-dai = <&pimix_dmic_codec>;
+            };
+        };
+    };
+};

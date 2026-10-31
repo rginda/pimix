@@ -1,0 +1,22 @@
+# Build artifacts
+build/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+*.dis
+*.dtbo
+
+# Node / UI
+node_modules/
+dist/
+.svelte-kit/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store

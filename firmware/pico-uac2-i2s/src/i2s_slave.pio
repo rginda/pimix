@@ -1,0 +1,85 @@
+;
+; PiMix RP2040 I2S Slave Transmitter (32-bit stereo slots, Philips I2S standard)
+;
+; Pin Mapping:
+;   OUT pin 0       : GPIO 9  (SDATA output to Pi 5 SDIx)
+;   IN  pin base 0  : GPIO 10 (BCLK input from Pi 5 GPIO 18, 3.072 MHz)
+;   IN  pin base 1  : GPIO 11 (LRCLK/WS input from Pi 5 GPIO 19, 48.0 kHz)
+;
+
+.program i2s_slave_tx
+
+public entry_point:
+    set x, 0                ; X=0 is used by 'pull noblock' when TX FIFO is empty (outputs silence)
+
+.wrap_target
+    ; Synchronize to the falling edge of LRCLK (Right -> Left transition)
+    ; During Right bit 1 (after BCLK rising edge #63), LRCLK is high (1).
+    wait 1 pin 1            ; Ensure we are in the Right channel half-frame (LRCLK == 1)
+    wait 0 pin 1            ; Wait for LRCLK falling edge (happens on BCLK falling edge #64)
+    out pins, 1             ; Drive Right channel Bit 0 (LSB) during the 1-BCLK I2S delay slot
+    wait 1 pin 0            ; Wait for BCLK rising edge #64 (Pi 5 samples Right Bit 0)
+
+    ; Load Left channel 32-bit sample (MSB-aligned) and shift out all 32 bits (Bit 31 .. Bit 0)
+    pull noblock            ; OSR = TX FIFO (or X=0 if empty)
+    set y, 31
+left_loop:
+    wait 0 pin 0            ; Wait for BCLK falling edge (#1 .. #32)
+    out pins, 1             ; Drive Left bit (31 .. 0)
+    wait 1 pin 0            ; Wait for BCLK rising edge (#1 .. #32)
+    jmp y-- left_loop
+
+    ; Load Right channel 32-bit sample (MSB-aligned) and shift out top 31 bits (Bit 31 .. Bit 1)
+    ; Bit 0 (LSB) is driven at the top of .wrap_target when LRCLK transitions 1 -> 0.
+    pull noblock            ; OSR = TX FIFO (or X=0 if empty)
+    set y, 30
+right_loop:
+    wait 0 pin 0            ; Wait for BCLK falling edge (#33 .. #63)
+    out pins, 1             ; Drive Right bit (31 .. 1)
+    wait 1 pin 0            ; Wait for BCLK rising edge (#33 .. #63)
+    jmp y-- right_loop
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+#include "hardware/gpio.h"
+
+static inline void i2s_slave_tx_program_init(PIO pio, uint sm, uint offset, uint pin_sdata, uint pin_bclk_base) {
+    pio_sm_config c = i2s_slave_tx_program_get_default_config(offset);
+
+    // Out pin: SDATA (1 pin)
+    sm_config_set_out_pins(&c, pin_sdata, 1);
+    // In pins: pin_bclk_base = BCLK (pin 0), pin_bclk_base + 1 = LRCLK (pin 1)
+    sm_config_set_in_pins(&c, pin_bclk_base);
+
+    // Shift out MSB first (left shift), no autopull (we use explicit 'pull noblock' for silence fallback)
+    sm_config_set_out_shift(&c, false, false, 32);
+
+    // Join FIFOs for deeper 8-word TX FIFO
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    // Run PIO at full system clock (125 MHz) for <8ns edge sampling resolution
+    sm_config_set_clkdiv(&c, 1.0f);
+
+    // Configure GPIO pads
+    pio_gpio_init(pio, pin_sdata);
+    gpio_set_dir(pin_sdata, GPIO_OUT);
+    gpio_put(pin_sdata, 0);
+
+    // BCLK and LRCLK are inputs (weak pull-down keeps lines quiet when master clock is idle)
+    gpio_init(pin_bclk_base);
+    gpio_set_dir(pin_bclk_base, GPIO_IN);
+    gpio_pull_down(pin_bclk_base);
+
+    gpio_init(pin_bclk_base + 1);
+    gpio_set_dir(pin_bclk_base + 1, GPIO_IN);
+    gpio_pull_down(pin_bclk_base + 1);
+
+    // Set pin directions in PIO
+    pio_sm_set_consecutive_pindirs(pio, sm, pin_sdata, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin_bclk_base, 2, false);
+
+    pio_sm_init(pio, sm, offset + i2s_slave_tx_offset_entry_point, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
