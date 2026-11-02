@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PiMix | 6-Channel Desk Audio Mixer &amp; Parametric EQ</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg aria-hidden="true" class="brand-icon" viewBox="0 0 24 24" width="26" height="26">
+        <path fill="currentColor" d="M3 17h2v4H3v-4zm0-14h2v10H3V3zm4 6h2v12H7V9zm0-6h2v4H7V3zm4 10h2v8h-2v-8zm0-10h2v8h-2V3zm4 4h2v14h-2V7zm0-4h2v2h-2V3zm4 12h2v6h-2v-6zm0-12h2v10h-2V3z"/>
+      </svg>
+      <div>
+        <h1>PiMix DSP Console</h1>
+        <p class="subtitle">RP1 4-Lane I2S • CamillaDSP 64-bit Float • 48.0 kHz</p>
+      </div>
+    </div>
+
+    <nav aria-label="Primary View" class="view-tabs">
+      <button type="button" id="tab-mixer" class="tab-btn active" aria-pressed="true">
+        Mixer &amp; EQ Console
+      </button>
+      <button type="button" id="tab-master-eq" class="tab-btn" aria-pressed="false">
+        10-Band Master EQ
+      </button>
+    </nav>
+
+    <div class="header-actions">
+      <div class="test-player" role="group" aria-label="Built-in Test Audio Generator">
+        <span class="badge-label">Test Audio:</span>
+        <button type="button" class="test-btn" data-test-mode="usb1">USB 1</button>
+        <button type="button" class="test-btn" data-test-mode="usb2">USB 2</button>
+        <button type="button" class="test-btn" data-test-mode="both">Both Mix</button>
+        <button type="button" class="test-btn stop-btn" data-test-mode="stopped">Stop</button>
+      </div>
+
+      <div class="preset-controls">
+        <label for="preset-select" class="visually-hidden">Load Preset</label>
+        <select id="preset-select" name="preset">
+          <option value="">— Presets —</option>
+        </select>
+        <button type="button" id="btn-open-preset-dialog" class="secondary-btn">Save Preset</button>
+      </div>
+
+      <div id="ws-status" class="status-pill disconnected" role="status" aria-live="polite">
+        <span class="status-dot"></span>
+        <span id="ws-status-text">Connecting…</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- Left / Upper Section: 6 Input Channel Strips + Master Strip -->
+    <section class="mixer-rack" aria-labelledby="heading-mixer">
+      <h2 id="heading-mixer" class="visually-hidden">Channel Faders and Metering</h2>
+      <div id="channel-strips-container" class="strips-grid"></div>
+    </section>
+
+    <!-- Right / Lower Section: Interactive Parametric EQ Curve & Band Inspector -->
+    <section class="eq-inspector" aria-labelledby="heading-eq">
+      <div class="eq-header">
+        <div class="eq-title-group">
+          <h2 id="heading-eq">Parametric Equalizer — <span id="eq-target-title">Master Output (10-Band)</span></h2>
+          <p id="eq-target-subtitle" class="subtitle">Drag nodes on the frequency curve or adjust individual band controls below</p>
+        </div>
+
+        <div class="eq-target-selector" role="group" aria-label="Select Channel for EQ Editing">
+          <button type="button" class="eq-select-btn" data-eq-target="usb1">USB 1</button>
+          <button type="button" class="eq-select-btn" data-eq-target="usb2">USB 2</button>
+          <button type="button" class="eq-select-btn" data-eq-target="usb3">USB 3</button>
+          <button type="button" class="eq-select-btn" data-eq-target="usb4">USB 4</button>
+          <button type="button" class="eq-select-btn" data-eq-target="line">Line In</button>
+          <button type="button" class="eq-select-btn" data-eq-target="bt">Bluetooth</button>
+          <button type="button" class="eq-select-btn active" data-eq-target="master">Master 10-Band</button>
+        </div>
+
+        <div class="eq-toolbar">
+          <button type="button" id="btn-rta-toggle" class="toggle-pill" aria-pressed="false">RTA: Pre+Post</button>
+          <button type="button" id="btn-rta-peak" class="secondary-btn" aria-pressed="true">Peak Hold: On</button>
+          <button type="button" id="btn-eq-bypass" class="toggle-pill" aria-pressed="false">EQ Active</button>
+          <button type="button" id="btn-eq-flat" class="secondary-btn">Flatten EQ (0 dB)</button>
+        </div>
+      </div>
+
+      <div class="eq-canvas-wrap">
+        <canvas id="eq-canvas" width="960" height="290" aria-label="Interactive Parametric EQ Frequency Response Graph from 20 Hz to 20 kHz"></canvas>
+      </div>
+
+      <div id="eq-bands-container" class="eq-bands-grid"></div>
+    </section>
+  </main>
+
+  <!-- Native Modal Dialog for Saving a Mixer & EQ Preset -->
+  <dialog id="preset-dialog" aria-labelledby="preset-dialog-title">
+    <form id="preset-form" method="dialog">
+      <h2 id="preset-dialog-title">Save Mixer &amp; EQ Preset</h2>
+      <div class="form-field">
+        <label for="preset-name-input">Preset Name</label>
+        <input
+          type="text"
+          id="preset-name-input"
+          name="preset_name"
+          required
+          maxlength="40"
+          autocorrect="off"
+          spellcheck="false"
+        >
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="btn-cancel-preset" class="secondary-btn">Cancel</button>
+        <button type="submit" class="primary-btn">Save Preset</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

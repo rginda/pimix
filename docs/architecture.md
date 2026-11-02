@@ -255,8 +255,9 @@ The user interface is built as a modern **Local Web Application (Svelte / React)
   - 6 stereo input channel strips (`USB 1`, `USB 2`, `USB 3`, `USB 4`, `Line In`, `Bluetooth`) + 1 `Master` strip.
   - Smooth 60 FPS stereo peak/RMS bar meters with peak-hold and clipping indicators (polled from CamillaDSP via WebSocket).
   - Touch-friendly faders, Mute, Solo, and quick-access EQ bypass buttons.
-- **Interactive Parametric EQ View:**
+- **Interactive Parametric EQ & Real-Time Spectrum Analyzer (RTA) View:**
   - Real-time frequency-response curve canvas (20 Hz – 20 kHz logarithmic plot) showing individual band curves and the composite EQ curve.
+  - 72-band 1/6-octave Real-Time Spectrum Analyzer (RTA) computed via a 4096-point Hann-windowed FFT from a concurrent ALSA `dsnoop` tap (`pimix_snoop`), displaying Pre-EQ input spectrum, Post-EQ output spectrum, and decaying Peak Hold directly behind the EQ curve.
   - Draggable control nodes for Frequency, Gain, and Q (bandwidth) for any selected input channel or the Master bus.
 - **Bluetooth & System Drawer:**
   - Displays connected Bluetooth device name, codec, and transport controls (Play/Pause/Next via BlueZ MediaPlayer1 D-Bus API), plus one-tap pairing mode.

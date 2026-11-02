@@ -60,3 +60,25 @@ A chronological engineering log tracking the architecture, firmware, hardware br
 - Connected a USB Audio DAC/Speaker interface (`hw:Device,0`, `1b3f:2008` Generalplus USB Audio Device, 48 kHz `S16_LE` stereo playback) to `rpi5-dev`.
 - Created [`pi5/camilladsp/pimix-4ch-usb-out.yml`](../pi5/camilladsp/pimix-4ch-usb-out.yml) to capture all 4 I2S channels (`hw:PiMixRP18ch,0`, `S32_LE` @ 48 kHz), sum `PiMix USB 1` (Ch 0–1) and `PiMix USB 2` (Ch 2–3) into a stereo output bus with asynchronous rate adaptation (`enable_rate_adjust: true`), and play out to `hw:Device,0`.
 - Created [`scripts/play-speaker-test.py`](../scripts/play-speaker-test.py) to launch CamillaDSP (`-p 1234` WebSocket control port enabled) and play a 14-second stereo musical test sequence across both Picos (`PiMix USB 1` solo arpeggio panning Left → Right, `PiMix USB 2` solo counter-melody panning Right → Left, and both Picos playing chords + melody simultaneously). Verified clean, glitch-free stereo audio from the speakers.
+
+---
+
+## 2026-11-01 — Real-Time Web UI, CamillaDSP Control Server, and 72-Band Live Spectrum Analyzer
+
+### 1. Zero-Dependency Backend Control Daemon ([`ui/backend/server.py`](../ui/backend/server.py))
+- Built an `asyncio` HTTP and RFC 6455 WebSocket server (`http://0.0.0.0:8080`) plus an async CamillaDSP WebSocket client (`ws://127.0.0.1:1234`) using only the Python standard library, `PyYAML`, and `NumPy`.
+- Dynamically generates and hot-reloads the CamillaDSP v3.0.0 configuration (`pi5/camilladsp/pimix-live.yml`) via `SetConfigJson` without interrupting audio playback:
+  - Per-channel 4-band Parametric EQ (`Lowshelf`, `2× Peaking`, `Highshelf` biquads).
+  - Stereo summing matrix supporting per-channel Fader Gain (`-60` to `+12 dB`), constant-power Balance/Pan (`L100`..`R100`), Mute, Solo, and Polarity Invert (`Ø`).
+  - Master 10-band Parametric/Graphic EQ (`31.5 Hz` – `16 kHz`), Master Trim, Soft Peak Limiter (`-0.5 dBFS`), and hardware USB DAC speaker volume (`amixer -c Device`).
+  - Persistent state and named preset storage (`pi5/camilladsp/mixer_state.json`) plus a built-in test audio generator triggerable from the browser.
+
+### 2. Digital Mixer & Interactive Parametric EQ Frontend ([`ui/frontend/`](../ui/frontend/))
+- Created [`ui/frontend/index.html`](../ui/frontend/index.html), [`ui/frontend/styles.css`](../ui/frontend/styles.css), and [`ui/frontend/app.js`](../ui/frontend/app.js):
+  - **6 Input Channel Strips (`USB 1`–`USB 4`, `Line In`, `Bluetooth`) + `Master Out` Strip** with real-time 25 FPS stereo L/R VU meters and peak dBFS readouts.
+  - **Interactive Parametric EQ Canvas (`20 Hz – 20 kHz`):** Computes exact RBJ Audio EQ Cookbook biquad magnitude responses at 48.0 kHz for individual bands and the composite sum, with pointer/touch node dragging for frequency and gain.
+
+### 3. Concurrent ALSA `dsnoop` Tap & 72-Band Real-Time Spectrum Analyzer (RTA)
+- Configured `~/.asoundrc` with `pcm.pimix_snoop` (`type dsnoop` on `hw:PiMixRP18ch,0`) so CamillaDSP and a real-time FFT analyzer process (`arecord -D pimix_snoop`) read the 4-channel 32-bit / 48 kHz I2S capture buffer simultaneously with zero contention.
+- Added a 4096-point Hann-windowed `numpy.fft.rfft` pipeline in `ui/backend/server.py` mapping FFT bins into 72 logarithmically spaced 1/6-octave bands (`20 Hz – 20 kHz`) for `USB 1`, `USB 2`, and the summed `Master` bus.
+- Rendered **Pre-EQ Input Spectrum**, **Post-EQ Output Spectrum**, and a decaying **Peak-Hold** trace at 60 FPS directly behind the Parametric EQ curve on `#eq-canvas`.
