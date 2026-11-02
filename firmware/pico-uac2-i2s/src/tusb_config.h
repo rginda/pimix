@@ -73,6 +73,7 @@ extern "C" {
 #define CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ (8 * CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX)
 
 #define CFG_TUD_AUDIO_ENABLE_FEEDBACK_EP                     1
+#define CFG_TUD_AUDIO_ENABLE_INTERRUPT_EP                    1
 #define CFG_TUD_AUDIO_FUNC_1_N_AS_INT                        1
 #define CFG_TUD_AUDIO_FUNC_1_CTRL_BUF_SZ                     64
 

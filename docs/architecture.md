@@ -75,13 +75,16 @@ Host PC (USB) ──> [ Pico #n ] (3V3_PICO / GND_PICO)
 | **SDI1 (Host 2)** | Pico #2 → Pi 5 | Pin 15 | `GPIO 22` (`i2s0_sdi1`) | #2 Ch D (Pico → Pi) | `GPIO 13` (Pin 17, PIO Out) | Stereo I2S Ch 2–3, 3.3V |
 | **SDI2 (Host 3)** | Pico #3 → Pi 5 | Pin 18 | `GPIO 24` (`i2s0_sdi2`) | #3 Ch D (Pico → Pi) | `GPIO 13` (Pin 17, PIO Out) | Stereo I2S Ch 4–5, 3.3V |
 | **SDI3 (Host 4)** | Pico #4 → Pi 5 | Pin 37 | `GPIO 26` (`i2s0_sdi3`) | #4 Ch D (Pico → Pi) | `GPIO 13` (Pin 17, PIO Out) | Stereo I2S Ch 6–7, 3.3V |
+| **CTRL_TX (Sync)** | Pi 5 → Picos 1–4 | Pin 8 | `GPIO 14` (`uart0_txd`) | Ch C (Pi → Pico) | `GPIO 12` (Pin 16, UART0 RX) | 115200 baud fader/mute sync |
 | **3V3_PI / GND_PI** | Pi 5 → Isolators Side 2 | Pins 1, 17 / 6, 9, 14, 20 | Power Rail | `VCC2` / `GND2` | *Isolated* | 3.3V DC (Pi Domain) |
 | **3V3_PICO / GND** | Pico #n → Isolator #n Side 1 | *Isolated* | *Isolated* | `VCC1` / `GND1` | Pin 36 (`3V3`) / Pin 18 (`GND`) | 3.3V DC (Host #n Domain) |
 
-### Bus Protocol Definition: 4-Lane Stereo I2S
+### Bus Protocol Definition: 4-Lane Stereo I2S with Embedded Subcode
 
 - **Sample Rate:** 48.0 kHz
-- **Slot Width:** 32 bits per channel (24-bit signed PCM audio MSB-aligned, lower 8 bits zero-padded `S32_LE`)
+- **Slot Width:** 32 bits per channel (`S32_LE`):
+  - **Bits `[31:8]`:** 24-bit signed MSB-aligned PCM audio (unattenuated from the USB host so all digital gain staging happens once in 64-bit float inside CamillaDSP).
+  - **Bits `[7:0]`:** 8-bit Host OS Volume/Mute Subcode (`<-144 dBFS`, masked out by the RTA and truncated by 16/24-bit output DACs).
 - **Channels per Data Lane:** 2 (Left when `LRCLK` is low, Right when `LRCLK` is high, standard I2S 1-BCLK delay after `LRCLK` transition)
 - **Total Parallel Channels:** 4 lanes × 2 channels = 8 channels
 - **Bit Clock Frequency:** 48,000 Hz × 32 bits × 2 channels = **3.072 MHz**
@@ -104,7 +107,21 @@ All four Raspberry Pi Picos run identical firmware images, differentiating their
 
 Because each Pico has its own dedicated `SDI` line to the Pi 5, the PIO state machine operates as a pure **external-clocked I2S Slave Transmitter**:
 - The PIO program waits for `LRCLK` (`GPIO 15`, Pin 20) to transition high-to-low (start of Left channel frame), observes the standard 1-bit I2S delay, and shifts out 64 bits (32-bit Left + 32-bit Right) on `GPIO 13` (Pin 17) synchronized to falling edges of the external `BCLK` (`GPIO 14`, Pin 19) so data is stable on rising `BCLK` edges at the Pi 5.
-- If the USB host is disconnected, muted, or not streaming, the DMA/PIO subsystem continuously outputs zeros (`0x00000000`) in lockstep with the Pi 5 clock so the I2S lane always carries valid silent PCM frames.
+- If the USB host is disconnected, muted, or not streaming, the DMA/PIO subsystem continuously outputs silent PCM in bits `[31:8]` while maintaining the active 8-bit Host Volume/Mute Subcode in bits `[7:0]`.
+
+### Bidirectional Host OS Volume/Mute ↔ PiMix Fader Synchronization
+
+Professional USB audio interfaces typically omit the UAC2 Feature Unit (`0x02`) Volume control to avoid "dual-fader" gain-staging traps—at the cost of disabling the host computer's keyboard volume/mute keys (`F10` / `F11` / `F12` on macOS). PiMix eliminates the dual-fader penalty while preserving native OS volume keys and two-way UI synchronization without relying on Wi-Fi:
+
+1. **Host Computer → Pico → Pi 5 → PiMix UI Fader (via 8-Bit I2S Subcode in Bits `[7:0]`):**
+   - Each Pico advertises a UAC2 Feature Unit (`-60.0 dB` to `0.0 dB` in `0.5 dB` steps + Mute) so macOS, Windows, and Linux enable native keyboard volume/mute controls.
+   - Instead of attenuating the 24-bit PCM samples on the Pico, the Pico passes unattenuated 24-bit audio in bits `[31:8]` and embeds an 8-bit subcode in bits `[7:0]` of each stereo I2S frame:
+     - `sub_l` (`0xA8..0xAF`): `0xA8 | (is_muted << 2) | (host_vol_seq & 0x03)`
+     - `sub_r` (`0..144`): half-dB steps above `-60.0 dB` (`120` = `0.0 dB`)
+   - Because `sub_l` (`168..175`) and `sub_r` (`0..144`) occupy disjoint byte ranges, the Pi 5 snoop daemon (`ui/backend/server.py`) self-identifies both bytes regardless of L/R word phase, updates CamillaDSP's 64-bit float fader and mute state, and broadcasts `host_fader_sync` to move the PiMix Web UI fader in real time.
+2. **PiMix UI Fader → Pi 5 → Pico → Host Computer (via `ISO7741 Ch C` UART / USB Vendor Control + UAC2 Interrupt Endpoint `EP 0x83`):**
+   - Each `ISO7741` quad digital isolator has 3 forward channels (`Pi 5 → Pico`) and 1 reverse channel (`Pico → Pi 5` for `SDATA`). Forward channels `A` and `B` carry `BCLK` and `LRCLK`, leaving **Forward Channel `C`** free to carry a shared `115200 baud` UART broadcast line from Pi 5 `UART0 TX` (`GPIO 14`, Pin 8) to all four Picos' `UART0 RX` (`GP12`, Pin 16) using a 4-byte checksummed packet (`[0xA5, (pico_idx & 0x0F) | (mute << 4), vol_step, csum]`). When a Pico is connected directly to the Pi 5 over USB on the bench, `server.py` also sends USB Vendor Control request `0xBF`.
+   - Upon receiving a fader/mute change from the Pi 5, the Pico updates its UAC2 Feature Unit registers and writes a 6-byte notification packet to its **UAC2 Audio Control Interrupt Endpoint (`EP 0x83`)** (`tud_audio_int_write`), prompting the host OS (`AppleUSBAudio` / `snd-usb-audio` / `usbaudio2.sys`) to issue `GET_CUR` and move the host OS volume slider and mute indicator to match.
 
 ## 4. Raspberry Pi 5 Linux & Audio Plumbing Configuration
 

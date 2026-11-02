@@ -20,6 +20,7 @@ REQ_BOOTSEL = 0xBB
 REQ_TEST_TONE = 0xBC
 REQ_DIAG = 0xBD
 REQ_FORCE_SDATA = 0xBE
+REQ_SET_VOL = 0xBF
 
 
 def find_pimix_usb_paths():
@@ -96,8 +97,18 @@ def main():
             target = sys.argv[3] if len(sys.argv) > 3 else ""
             if target and target not in name:
                 continue
-            print(f"Setting {name} ({path}) GPIO 9 SDATA mode to {mode} (0=PIO, 1=LOW, 2=HIGH)...")
+            print(f"Setting {name} ({path}) GPIO 13 SDATA mode to {mode} (0=PIO, 1=LOW, 2=HIGH)...")
             send_vendor_req(path, REQ_FORCE_SDATA, mode)
+        elif cmd == "setvol":
+            gain_db = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
+            mute_bit = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+            target = sys.argv[4] if len(sys.argv) > 4 else ""
+            if target and target not in name:
+                continue
+            vol_step = max(0, min(144, int(round((gain_db + 60.0) * 2.0))))
+            wValue = ((mute_bit & 1) << 8) | vol_step
+            print(f"Setting {name} ({path}) fader sync -> gain={gain_db:.1f} dB (step={vol_step}), mute={mute_bit}...")
+            send_vendor_req(path, REQ_SET_VOL, wValue)
         elif cmd == "diag":
             g_now, g_or, g_and, dma_cnt, dma_a, dma_b, pio_st, buf_a0 = read_diag(path)
             toggling = g_or ^ g_and

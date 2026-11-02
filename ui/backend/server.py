@@ -10,6 +10,8 @@ PiMix Backend Control Daemon & Web UI Server (http://0.0.0.0:8080)
 import asyncio
 import base64
 import copy
+import fcntl
+import glob
 import hashlib
 import json
 import math
@@ -17,6 +19,7 @@ import mimetypes
 import os
 import struct
 import subprocess
+import time
 from pathlib import Path
 import numpy as np
 import yaml
@@ -530,6 +533,9 @@ class PiMixController:
             "usb2": [-95.0] * NUM_SPEC_BINS,
             "master": [-95.0] * NUM_SPEC_BINS,
         }
+        self.last_host_state: dict[str, tuple[int, int, bool]] = {}
+        self.last_ui_fader_ts: dict[str, float] = {}
+        self.camilla_proc: subprocess.Popen | None = None
         self.load_state()
 
     def load_state(self):
@@ -567,7 +573,7 @@ class PiMixController:
         subprocess.run(["pkill", "-f", "arecord -D pimix_snoop"], check=False)
         await asyncio.sleep(0.4)
         log_f = open("/tmp/camilladsp.log", "w")
-        subprocess.Popen(
+        self.camilla_proc = subprocess.Popen(
             ["/usr/local/bin/camilladsp", "-p", str(CAMILLA_PORT), str(LIVE_YML_FILE)],
             stdout=log_f,
             stderr=subprocess.STDOUT,
@@ -575,6 +581,10 @@ class PiMixController:
         )
         await asyncio.sleep(0.8)
         await self.camilla.connect()
+        self.set_hw_speaker_volume(self.state["master"].get("hw_volume_pct", 85))
+        for ch in self.state["channels"]:
+            if ch["id"] in ("usb1", "usb2", "usb3", "usb4"):
+                self.sync_fader_to_pico(ch["id"], ch["gain_db"], ch["mute"])
 
     async def apply_dsp_config(self):
         cfg = build_camilladsp_config(self.state, capture_channels=4)
@@ -582,8 +592,56 @@ class PiMixController:
         res = await self.camilla.command({"SetConfigJson": json.dumps(cfg)})
         return res
 
+    def sync_fader_to_pico(self, ch_id: str, gain_db: float, is_muted: bool):
+        """Send fader/mute update from PiMix UI to the target Pico via UART (ISO7741 Ch C) and USB Vendor Control."""
+        pico_map = {"usb1": (0, "PiMix USB 1"), "usb2": (1, "PiMix USB 2"), "usb3": (2, "PiMix USB 3"), "usb4": (3, "PiMix USB 4")}
+        if ch_id not in pico_map:
+            return
+        pico_idx, prod_name = pico_map[ch_id]
+        vol_step = max(0, min(144, int(round((float(gain_db) + 60.0) * 2.0))))
+        mute_bit = 1 if is_muted else 0
+        self.last_ui_fader_ts[ch_id] = time.monotonic()
+
+        # 1. Hardware UART broadcast frame [0xA5, (pico_idx & 0x0F) | (mute_bit << 4), vol_step, csum]
+        for uart_dev in ("/dev/ttyAMA0", "/dev/serial0"):
+            if os.path.exists(uart_dev):
+                try:
+                    b1 = (pico_idx & 0x0F) | (mute_bit << 4)
+                    csum = 0xA5 ^ b1 ^ vol_step
+                    pkt = bytes([0xA5, b1, vol_step, csum])
+                    fd = os.open(uart_dev, os.O_WRONLY | os.O_NOCTTY | os.O_NONBLOCK)
+                    try:
+                        os.write(fd, pkt)
+                    finally:
+                        os.close(fd)
+                    break
+                except Exception:
+                    pass
+
+        # 2. USB Vendor Control (REQ_SET_VOL = 0xBF) when Pico USB is plugged into Pi 5
+        wValue = (mute_bit << 8) | vol_step
+        USBDEVFS_CONTROL = 0xC0185500
+        for dev_dir in glob.glob("/sys/bus/usb/devices/*"):
+            try:
+                pfile = os.path.join(dev_dir, "product")
+                if not os.path.exists(pfile):
+                    continue
+                if open(pfile).read().strip() == prod_name:
+                    bus = int(open(os.path.join(dev_dir, "busnum")).read().strip())
+                    dev = int(open(os.path.join(dev_dir, "devnum")).read().strip())
+                    dev_path = f"/dev/bus/usb/{bus:03d}/{dev:03d}"
+                    ctrl = struct.pack("BBHHHIIP", 0x40, 0xBF, wValue, 0, 0, 200, 0, 0)
+                    fd = os.open(dev_path, os.O_RDWR)
+                    try:
+                        fcntl.ioctl(fd, USBDEVFS_CONTROL, ctrl)
+                    finally:
+                        os.close(fd)
+                    break
+            except Exception:
+                pass
+
     async def fft_snoop_loop(self):
-        """Continuously snoops the 4-channel S32_LE I2S stream via `pimix_snoop` and computes 72-band FFT."""
+        """Continuously snoops the 4-channel S32_LE I2S stream via `pimix_snoop`, decodes I2S subcodes, and computes 72-band FFT."""
         chunk_frames = 1024
         chunk_bytes = chunk_frames * 4 * 4  # 1024 frames * 4 channels * 4 bytes (int32)
         norm_factor = 1.0 / 2147483648.0
@@ -604,12 +662,55 @@ class PiMixController:
                 )
                 while True:
                     raw = await proc.stdout.readexactly(chunk_bytes)
+                    arr = np.frombuffer(raw, dtype=np.int32).reshape(-1, 4)
+
+                    # 1. Decode embedded I2S Subcode in bits [7:0] of Left & Right words for USB 1 and USB 2
+                    now_mono = time.monotonic()
+                    for pico_idx, ch_id in enumerate(("usb1", "usb2")):
+                        b0 = int(arr[-1, pico_idx * 2]) & 0xFF
+                        b1 = int(arr[-1, pico_idx * 2 + 1]) & 0xFF
+                        if (b0 & 0xF8) == 0xA8 and b1 <= 144:
+                            sub_l, sub_r = b0, b1
+                        elif (b1 & 0xF8) == 0xA8 and b0 <= 144:
+                            sub_l, sub_r = b1, b0
+                        else:
+                            continue
+
+                        seq = sub_l & 0x03
+                        host_mute = bool((sub_l >> 2) & 0x01)
+                        vol_step = max(0, min(144, sub_r))
+                        host_gain_db = round(vol_step * 0.5 - 60.0, 1)
+                        cur_host_state = (seq, vol_step, host_mute)
+                        prev_state = self.last_host_state.get(ch_id)
+                        if prev_state is None:
+                            self.last_host_state[ch_id] = cur_host_state
+                        elif cur_host_state != prev_state:
+                            self.last_host_state[ch_id] = cur_host_state
+                            if now_mono - self.last_ui_fader_ts.get(ch_id, 0.0) > 0.35:
+                                for ch in self.state["channels"]:
+                                    if ch["id"] == ch_id:
+                                        ch["gain_db"] = host_gain_db
+                                        ch["mute"] = host_mute
+                                        break
+                                self.save_state()
+                                await self.apply_dsp_config()
+                                await self.broadcast({
+                                    "type": "host_fader_sync",
+                                    "id": ch_id,
+                                    "gain_db": host_gain_db,
+                                    "mute": host_mute,
+                                })
+
                     if not self.ws_clients:
                         continue
-                    arr = np.frombuffer(raw, dtype=np.int32).reshape(-1, 4)
-                    # Mono-sum L+R of USB 1 (ch 0,1) and USB 2 (ch 2,3) in float32 (-1.0 .. +1.0)
-                    u1 = ((arr[:, 0].astype(np.float32) + arr[:, 1].astype(np.float32)) * 0.5) * norm_factor
-                    u2 = ((arr[:, 2].astype(np.float32) + arr[:, 3].astype(np.float32)) * 0.5) * norm_factor
+
+                    # 2. Mask off subcode bits [7:0] and mono-sum L+R of USB 1 (ch 0,1) and USB 2 (ch 2,3)
+                    a0 = (arr[:, 0] & ~0xFF).astype(np.float32)
+                    a1 = (arr[:, 1] & ~0xFF).astype(np.float32)
+                    a2 = (arr[:, 2] & ~0xFF).astype(np.float32)
+                    a3 = (arr[:, 3] & ~0xFF).astype(np.float32)
+                    u1 = ((a0 + a1) * 0.5) * norm_factor
+                    u2 = ((a2 + a3) * 0.5) * norm_factor
 
                     self.ring_usb1 = np.roll(self.ring_usb1, -chunk_frames)
                     self.ring_usb1[-chunk_frames:] = u1
@@ -681,12 +782,14 @@ class PiMixController:
         self.test_procs.clear()
         self.test_mode = "stopped"
 
-    async def broadcast(self, msg: dict):
+    async def broadcast(self, msg: dict, exclude: asyncio.StreamWriter | None = None):
         if not self.ws_clients:
             return
         frame = ws_encode_frame(json.dumps(msg).encode("utf-8"), opcode=1, mask=False)
         dead = []
         for w in list(self.ws_clients):
+            if w is exclude:
+                continue
             try:
                 w.write(frame)
                 await w.drain()
@@ -698,6 +801,9 @@ class PiMixController:
     async def meter_loop(self):
         while True:
             await asyncio.sleep(1.0 / 25.0)
+            if self.camilla_proc is not None and self.camilla_proc.poll() is not None:
+                if os.path.exists("/proc/asound/Device"):
+                    await self.ensure_camilladsp_running()
             if not self.ws_clients:
                 continue
 
@@ -748,10 +854,12 @@ class PiMixController:
                     for k in ("name", "gain_db", "pan", "mute", "solo", "invert", "eq_bypass", "eq_bands"):
                         if k in msg:
                             ch[k] = msg[k]
+                    if "gain_db" in msg or "mute" in msg:
+                        self.sync_fader_to_pico(ch_id, ch.get("gain_db", 0.0), ch.get("mute", False))
                     break
             self.save_state()
             await self.apply_dsp_config()
-            await self.broadcast({"type": "state", "state": self.state})
+            await self.broadcast({"type": "state", "state": self.state}, exclude=writer)
 
         elif mtype == "update_master":
             m = self.state["master"]
@@ -762,7 +870,7 @@ class PiMixController:
                 self.set_hw_speaker_volume(msg["hw_volume_pct"])
             self.save_state()
             await self.apply_dsp_config()
-            await self.broadcast({"type": "state", "state": self.state})
+            await self.broadcast({"type": "state", "state": self.state}, exclude=writer)
 
         elif mtype == "reset_eq":
             target = msg.get("target", "master")

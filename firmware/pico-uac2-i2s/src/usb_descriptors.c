@@ -40,9 +40,11 @@ uint8_t const *tud_descriptor_device_cb(void) {
 #if defined(TUD_ENDPOINT_ONE_DIRECTION_ONLY)
   #define EPNUM_AUDIO_FB    0x01
   #define EPNUM_AUDIO_OUT   0x02
+  #define EPNUM_AUDIO_INT   0x03
 #else
   #define EPNUM_AUDIO_FB    0x01
   #define EPNUM_AUDIO_OUT   0x01
+  #define EPNUM_AUDIO_INT   0x03
 #endif
 
 uint8_t const desc_configuration_default[] = {
@@ -54,7 +56,8 @@ uint8_t const desc_configuration_default[] = {
         EPNUM_AUDIO_OUT,
         CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX,
         EPNUM_AUDIO_FB | 0x80,
-        4)
+        4,
+        EPNUM_AUDIO_INT | 0x80)
 };
 
 // macOS requires a 3-byte (10.14) feedback endpoint on Full-Speed USB
@@ -67,7 +70,8 @@ uint8_t const desc_configuration_osx_fs[] = {
         EPNUM_AUDIO_OUT,
         CFG_TUD_AUDIO_FUNC_1_EP_OUT_SZ_MAX,
         EPNUM_AUDIO_FB | 0x80,
-        3)
+        3,
+        EPNUM_AUDIO_INT | 0x80)
 };
 
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {

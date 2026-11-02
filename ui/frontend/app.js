@@ -1021,6 +1021,27 @@ function connectWebSocket() {
         if (msg.test_mode) updateTestButtons(msg.test_mode);
       } else if (msg.type === "meters") {
         updateMeters(msg);
+      } else if (msg.type === "host_fader_sync") {
+        if (appState) {
+          const ch = appState.channels.find((c) => c.id === msg.id);
+          if (ch) {
+            ch.gain_db = msg.gain_db;
+            ch.mute = msg.mute;
+            const slider = document.getElementById(`fader-${ch.id}`);
+            const out = document.getElementById(`fader-${ch.id}-out`);
+            if (slider && out) {
+              slider.value = String(ch.gain_db);
+              const txt = formatDb(ch.gain_db);
+              out.textContent = txt;
+              syncSliderValue(slider, txt);
+            }
+            const strip = document.querySelector(`[data-strip-id="${ch.id}"]`);
+            if (strip) {
+              const muteBtn = strip.querySelector(".btn-mute");
+              if (muteBtn) muteBtn.setAttribute("aria-pressed", String(Boolean(ch.mute)));
+            }
+          }
+        }
       } else if (msg.type === "test_status") {
         updateTestButtons(msg.test_mode);
       }

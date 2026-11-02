@@ -38,6 +38,7 @@ target_link_libraries(pimix_uac2_i2s PRIVATE
     hardware_dma
     hardware_clocks
     hardware_watchdog
+    hardware_uart
     tinyusb_device
     tinyusb_board
 )

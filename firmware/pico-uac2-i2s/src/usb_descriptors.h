@@ -18,6 +18,7 @@ enum {
 #define PIMIX_VENDOR_REQ_TEST_TONE      0xBC
 #define PIMIX_VENDOR_REQ_DIAG           0xBD
 #define PIMIX_VENDOR_REQ_FORCE_SDATA    0xBE
+#define PIMIX_VENDOR_REQ_SET_VOL        0xBF
 
 #define TUD_AUDIO_SPEAKER_STEREO_FB_DESC_LEN (TUD_AUDIO_DESC_IAD_LEN\
   + TUD_AUDIO_DESC_STD_AC_LEN\
@@ -26,6 +27,7 @@ enum {
   + TUD_AUDIO_DESC_INPUT_TERM_LEN\
   + TUD_AUDIO_DESC_OUTPUT_TERMINAL_LEN_FIX\
   + TUD_AUDIO_DESC_FEATURE_UNIT_TWO_CHANNEL_LEN\
+  + TUD_AUDIO_DESC_STD_AC_INT_EP_LEN\
   + TUD_AUDIO_DESC_STD_AS_INT_LEN\
   + TUD_AUDIO_DESC_STD_AS_INT_LEN\
   + TUD_AUDIO_DESC_CS_AS_INT_LEN\
@@ -36,11 +38,11 @@ enum {
 
 #define TUD_AUDIO_DESC_OUTPUT_TERMINAL_LEN_FIX TUD_AUDIO_DESC_OUTPUT_TERM_LEN
 
-#define TUD_AUDIO_SPEAKER_STEREO_FB_DESCRIPTOR(_itfnum, _stridx, _nBytesPerSample, _nBitsUsedPerSample, _epout, _epoutsize, _epfb, _epfbsize) \
+#define TUD_AUDIO_SPEAKER_STEREO_FB_DESCRIPTOR(_itfnum, _stridx, _nBytesPerSample, _nBitsUsedPerSample, _epout, _epoutsize, _epfb, _epfbsize, _epint) \
   /* Standard Interface Association Descriptor (IAD) */\
   TUD_AUDIO_DESC_IAD(/*_firstitf*/ _itfnum, /*_nitfs*/ 0x02, /*_stridx*/ 0x00),\
-  /* Standard AC Interface Descriptor(4.7.1) */\
-  TUD_AUDIO_DESC_STD_AC(/*_itfnum*/ _itfnum, /*_nEPs*/ 0x00, /*_stridx*/ _stridx),\
+  /* Standard AC Interface Descriptor(4.7.1) — 1 Interrupt Endpoint for Host Volume Sync */\
+  TUD_AUDIO_DESC_STD_AC(/*_itfnum*/ _itfnum, /*_nEPs*/ 0x01, /*_stridx*/ _stridx),\
   /* Class-Specific AC Interface Header Descriptor(4.7.2) */\
   TUD_AUDIO_DESC_CS_AC(/*_bcdADC*/ 0x0200, /*_category*/ AUDIO_FUNC_DESKTOP_SPEAKER, /*_totallen*/ TUD_AUDIO_DESC_CLK_SRC_LEN+TUD_AUDIO_DESC_INPUT_TERM_LEN+TUD_AUDIO_DESC_OUTPUT_TERM_LEN+TUD_AUDIO_DESC_FEATURE_UNIT_TWO_CHANNEL_LEN, /*_ctrl*/ AUDIO_CS_AS_INTERFACE_CTRL_LATENCY_POS),\
   /* Clock Source Descriptor(4.7.2.1) */\
@@ -49,8 +51,10 @@ enum {
   TUD_AUDIO_DESC_INPUT_TERM(/*_termid*/ 0x01, /*_termtype*/ AUDIO_TERM_TYPE_USB_STREAMING, /*_assocTerm*/ 0x00, /*_clkid*/ 0x04, /*_nchannelslogical*/ 0x02, /*_channelcfg*/ AUDIO_CHANNEL_CONFIG_NON_PREDEFINED, /*_idxchannelnames*/ 0x00, /*_ctrl*/ 0 * (AUDIO_CTRL_R << AUDIO_IN_TERM_CTRL_CONNECTOR_POS), /*_stridx*/ 0x00),\
   /* Output Terminal Descriptor(4.7.2.5) */\
   TUD_AUDIO_DESC_OUTPUT_TERM(/*_termid*/ 0x03, /*_termtype*/ AUDIO_TERM_TYPE_OUT_DESKTOP_SPEAKER, /*_assocTerm*/ 0x01, /*_srcid*/ 0x02, /*_clkid*/ 0x04, /*_ctrl*/ 0x0000, /*_stridx*/ 0x00),\
-  /* Feature Unit Descriptor(4.7.2.8) */\
-  TUD_AUDIO_DESC_FEATURE_UNIT_TWO_CHANNEL(/*_unitid*/ 0x02, /*_srcid*/ 0x01, /*_ctrlch0master*/ AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_MUTE_POS | AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_VOLUME_POS, /*_ctrlch1*/ AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_MUTE_POS | AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_VOLUME_POS, /*_ctrlch2*/ AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_MUTE_POS | AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_VOLUME_POS,/*_stridx*/ 0x00),\
+  /* Feature Unit Descriptor(4.7.2.8) — Master (ch0) RW Mute + Volume */\
+  TUD_AUDIO_DESC_FEATURE_UNIT_TWO_CHANNEL(/*_unitid*/ 0x02, /*_srcid*/ 0x01, /*_ctrlch0master*/ AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_MUTE_POS | AUDIO_CTRL_RW << AUDIO_FEATURE_UNIT_CTRL_VOLUME_POS, /*_ctrlch1*/ 0x00000000, /*_ctrlch2*/ 0x00000000, /*_stridx*/ 0x00),\
+  /* Standard AC Interrupt Endpoint Descriptor(4.8.2.1) */\
+  TUD_AUDIO_DESC_STD_AC_INT_EP(/*_ep*/ _epint, /*_interval*/ 0x01),\
   /* Standard AS Interface Descriptor(4.9.1) */\
   /* Interface 1, Alternate 0 - default alternate setting with 0 bandwidth */\
   TUD_AUDIO_DESC_STD_AS_INT(/*_itfnum*/ (uint8_t)((_itfnum) + 1), /*_altset*/ 0x00, /*_nEPs*/ 0x00, /*_stridx*/ 0x00),\
